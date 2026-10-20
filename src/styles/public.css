@@ -60,6 +60,56 @@
   background: linear-gradient(to left, var(--brand-ember), transparent);
 }
 
+/* Gender radios, styled as two big choices */
+fieldset.field {
+  border: 0;
+  padding: 0;
+  margin: 0 0 16px;
+  min-width: 0;
+}
+
+fieldset.field legend {
+  padding: 0;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.choice-row {
+  display: flex;
+  gap: 10px;
+}
+
+.field .choice {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--field-bg);
+  cursor: pointer;
+}
+
+.choice input {
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--brand-gold);
+}
+
+.choice:has(input:checked) {
+  border-color: var(--brand-gold);
+}
+
+fieldset[aria-invalid='true'] .choice {
+  border-color: var(--error);
+}
+
 /* Honeypot: off-screen for people, still in the DOM for bots */
 .hp {
   position: absolute;

@@ -59,6 +59,7 @@ export interface RegisterResult {
   field?: string;
   token?: string;
   fullName?: string;
+  gender?: 'male' | 'female';
   status?: 'confirmed' | 'waiting';
   attendanceNumber?: number;
   waitingPosition?: number;
@@ -77,18 +78,19 @@ export function uuid(): string {
 
 export function register(
   db: Db,
-  fields: Partial<{ name: string; phone: string; faculty: string; university: string; sub: string; website: string }> = {},
+  fields: Partial<{ name: string; phone: string; faculty: string; university: string; gender: string; sub: string; website: string }> = {},
   opts: { ip?: string } = {},
 ): Promise<RegisterResult> {
   return asRole<RegisterResult>(
     db,
     'anon',
-    'select public.register_member($1, $2, $3, $4, $5, $6)',
+    'select public.register_member($1, $2, $3, $4, $5, $6, $7)',
     [
       fields.name ?? 'مينا جرجس',
       fields.phone ?? phoneFor(counter + 1),
       fields.faculty ?? 'هندسة',
       fields.university ?? 'جامعة القاهرة',
+      fields.gender ?? 'male',
       fields.sub ?? uuid(),
       fields.website ?? '',
     ],

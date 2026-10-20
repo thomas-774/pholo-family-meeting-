@@ -21,7 +21,7 @@ describe('cleanText', () => {
 });
 
 describe('validateRegistration', () => {
-  const ok = { fullName: 'مينا جرجس', phone: '01001234567', faculty: 'هندسة', university: 'القاهرة' };
+  const ok = { fullName: 'مينا جرجس', gender: 'male', phone: '01001234567', faculty: 'هندسة', university: 'القاهرة' };
 
   it('accepts a valid form', () => {
     expect(validateRegistration(ok)).toBeNull();
@@ -29,6 +29,8 @@ describe('validateRegistration', () => {
 
   it('returns the first invalid field', () => {
     expect(validateRegistration({ ...ok, fullName: ' م ' })).toBe('full_name');
+    expect(validateRegistration({ ...ok, gender: '' })).toBe('gender');
+    expect(validateRegistration({ ...ok, gender: 'other' })).toBe('gender');
     expect(validateRegistration({ ...ok, phone: '01312345678' })).toBe('phone');
     expect(validateRegistration({ ...ok, phone: '0100123456' })).toBe('phone');
     expect(validateRegistration({ ...ok, faculty: '  ' })).toBe('faculty');

@@ -5,7 +5,7 @@
 //          -e SUPABASE_ANON_KEY=<test anon key> \
 //          loadtest/rush.k6.js
 //
-// Before: empty test project, capacity 200, and raise the rate limit (k6 uses one IP):
+// Before: empty test project, capacity 100 boys + 100 girls, and raise the rate limit (k6 uses one IP):
 //   update private.settings set rate_limit_per_minute = 100000 where id = 1;
 // After: check numbering with loadtest/verify.sql, then set the rate limit back to 30.
 //
@@ -94,6 +94,7 @@ export function register() {
       p_phone: phone,
       p_faculty: 'هندسة',
       p_university: 'جامعة الاختبار',
+      p_gender: n % 2 === 0 ? 'male' : 'female',
       p_submission_id: uuid(),
       p_website: '',
     }),

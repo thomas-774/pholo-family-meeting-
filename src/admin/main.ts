@@ -4,10 +4,11 @@ import '../styles/base.css';
 import '../styles/admin.css';
 import { createClient, type PostgrestError } from '@supabase/supabase-js';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../shared/config';
-import { normalizePhone } from '../shared/phone';
+import { GENDER_LABEL, normalizePhone, type Gender } from '../shared/phone';
 
 interface Row {
   id: number;
+  gender: Gender;
   attendanceNumber: number | null;
   fullName: string;
   phone: string;
@@ -19,9 +20,15 @@ interface Row {
   confirmedAt: string | null;
 }
 
-interface Dashboard {
+interface Pool {
   capacity: number;
-  lastAttendanceNumber: number;
+  confirmed: number;
+  waiting: number;
+}
+
+interface Dashboard {
+  male: Pool;
+  female: Pool;
   confirmed: number;
   waiting: number;
   total: number;
@@ -30,7 +37,7 @@ interface Dashboard {
 
 type CapacityResult =
   | { result: 'ok'; capacity: number; promotedCount: number; promoted: { attendanceNumber: number }[] }
-  | { result: 'invalid'; reason: 'below_confirmed' | 'out_of_range'; confirmed?: number };
+  | { result: 'invalid'; reason: 'below_confirmed' | 'out_of_range' | 'invalid_gender'; confirmed?: number };
 
 type DeleteResult =
   | { result: 'ok'; deletedId: number; promoted: { id: number; fullName: string; attendanceNumber: number } | null }
@@ -50,10 +57,12 @@ const loginAlert = $('login-alert');
 const loginBtn = $<HTMLButtonElement>('login-btn');
 const dashAlert = $('dash-alert');
 const capacityForm = $<HTMLFormElement>('capacity-form');
+const capacityGender = $<HTMLSelectElement>('capacity-gender');
 const capacityInput = $<HTMLInputElement>('capacity');
 const capacityBtn = $<HTMLButtonElement>('capacity-btn');
 const capacityResult = $('capacity-result');
 const statusFilter = $<HTMLSelectElement>('status-filter');
+const genderFilter = $<HTMLSelectElement>('gender-filter');
 const searchInput = $<HTMLInputElement>('search');
 const rowsEl = $('rows');
 
@@ -144,22 +153,34 @@ function matches(row: Row, query: string, phoneQuery: string): boolean {
 function render(): void {
   if (!data) return;
 
+  for (const g of ['male', 'female'] as const) {
+    const pool = data[g];
+    $(`count-${g}`).textContent = String(pool.confirmed);
+    $(`capacity-${g}`).textContent = String(pool.capacity);
+    $(`left-${g}`).textContent = String(Math.max(0, pool.capacity - pool.confirmed));
+    $(`waiting-${g}`).textContent = String(pool.waiting);
+  }
   $('count-confirmed').textContent = String(data.confirmed);
-  $('count-capacity').textContent = String(data.capacity);
   $('count-waiting').textContent = String(data.waiting);
   $('count-total').textContent = String(data.total);
+
+  const pool = data[capacityGender.value as Gender];
   if (!capacityDirty && document.activeElement !== capacityInput) {
-    capacityInput.value = String(data.capacity);
+    capacityInput.value = String(pool.capacity);
   }
-  capacityInput.min = String(Math.max(1, data.confirmed));
+  capacityInput.min = String(Math.max(1, pool.confirmed));
 
   const filter = statusFilter.value;
+  const gFilter = genderFilter.value;
   const query = searchInput.value.trim().toLowerCase();
   const phoneQuery = /\d|[٠-٩]/.test(query) ? normalizePhone(query) : '';
 
-  // Server order: confirmed by number, then waiting by position
+  // Server order: confirmed boys, confirmed girls (by number), then waiting boys, waiting girls
   const rows = data.registrations.filter(
-    (r) => (filter === 'all' || r.status === filter) && matches(r, query, phoneQuery),
+    (r) =>
+      (filter === 'all' || r.status === filter) &&
+      (gFilter === 'all' || r.gender === gFilter) &&
+      matches(r, query, phoneQuery),
   );
 
   const frag = document.createDocumentFragment();
@@ -167,6 +188,7 @@ function render(): void {
     const tr = document.createElement('tr');
     tr.append(
       cell(r.attendanceNumber != null ? String(r.attendanceNumber) : '—', 'num'),
+      cell(GENDER_LABEL[r.gender]),
       cell(r.fullName),
       cell(r.phone, 'phone'),
       cell(r.faculty),
@@ -196,7 +218,7 @@ function render(): void {
     const tr = document.createElement('tr');
     tr.className = 'empty-row';
     const td = cell(data.total === 0 ? 'لسه مفيش تسجيلات.' : 'مفيش نتايج.');
-    td.colSpan = 9;
+    td.colSpan = 10;
     tr.append(td);
     frag.append(tr);
   }
@@ -207,11 +229,13 @@ function render(): void {
 }
 
 statusFilter.addEventListener('change', render);
+genderFilter.addEventListener('change', render);
 searchInput.addEventListener('input', render);
 
 // ---------- Delete ----------
 async function deleteRow(row: Row, btn: HTMLButtonElement): Promise<void> {
-  const label = row.attendanceNumber != null ? `رقم ${row.attendanceNumber}` : 'من قائمة الانتظار';
+  const pool = GENDER_LABEL[row.gender];
+  const label = row.attendanceNumber != null ? `رقم ${row.attendanceNumber} ${pool}` : `من انتظار ال${pool}`;
   if (!window.confirm(`متأكد إنك عايز تحذف تسجيل "${row.fullName}" (${label})؟ مينفعش التراجع.`)) return;
 
   btn.disabled = true;
@@ -247,6 +271,12 @@ capacityInput.addEventListener('input', () => {
   capacityDirty = true;
 });
 
+capacityGender.addEventListener('change', () => {
+  capacityDirty = false;
+  show(capacityResult, null);
+  render();
+});
+
 function setCapacityMessage(message: string, isError: boolean): void {
   capacityResult.classList.toggle('is-error', isError);
   show(capacityResult, message);
@@ -260,8 +290,9 @@ capacityForm.addEventListener('submit', async (event) => {
     return;
   }
 
+  const gender = capacityGender.value as Gender;
   capacityBtn.disabled = true;
-  const { data: res, error } = await supabase.rpc('set_capacity', { p_new_capacity: value });
+  const { data: res, error } = await supabase.rpc('set_capacity', { p_gender: gender, p_new_capacity: value });
   capacityBtn.disabled = false;
 
   if (error) {
@@ -284,7 +315,7 @@ capacityForm.addEventListener('submit', async (event) => {
     );
   } else {
     const n = result.promotedCount;
-    let message = `السعة بقت ${result.capacity}`;
+    let message = `سعة ال${GENDER_LABEL[gender]} بقت ${result.capacity}`;
     if (n > 0) {
       const first = result.promoted[0].attendanceNumber;
       const last = result.promoted[n - 1].attendanceNumber;

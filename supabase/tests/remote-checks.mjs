@@ -54,7 +54,7 @@ async function security() {
   check(!ins.ok, 'anon cannot insert into private.registrations', `HTTP ${ins.status}`);
 
   for (const fn of ['admin_dashboard', 'set_capacity']) {
-    const body = fn === 'set_capacity' ? { p_new_capacity: 1000 } : {};
+    const body = fn === 'set_capacity' ? { p_gender: 'male', p_new_capacity: 1000 } : {};
     const res = await rest(`rpc/${fn}`, { method: 'POST', body: JSON.stringify(body) });
     check(!res.ok, `anon cannot call ${fn}`, `HTTP ${res.status}`);
   }
@@ -77,7 +77,7 @@ async function security() {
     const c = await client(NONADMIN_EMAIL, NONADMIN_PASSWORD);
     const d = await c.rpc('admin_dashboard');
     check(!!d.error, 'logged-in non-admin cannot call admin_dashboard', d.error?.code);
-    const s = await c.rpc('set_capacity', { p_new_capacity: 1000 });
+    const s = await c.rpc('set_capacity', { p_gender: 'male', p_new_capacity: 1000 });
     check(!!s.error, 'logged-in non-admin cannot call set_capacity', s.error?.code);
   } else {
     console.log('SKIP  non-admin checks (set NONADMIN_EMAIL / NONADMIN_PASSWORD)');
@@ -88,6 +88,9 @@ function phone(i) {
   return '015' + String(i).padStart(8, '0');
 }
 
+// Even i = boy, odd i = girl
+const genderOf = (i) => (i % 2 === 0 ? 'male' : 'female');
+
 function registerCall(i) {
   return rest('rpc/register_member', {
     method: 'POST',
@@ -96,6 +99,7 @@ function registerCall(i) {
       p_phone: phone(i),
       p_faculty: 'هندسة',
       p_university: 'جامعة الاختبار',
+      p_gender: genderOf(i),
       p_submission_id: randomUUID(),
       p_website: '',
     }),
@@ -114,44 +118,49 @@ async function concurrency() {
   const admin = await client(ADMIN_EMAIL, ADMIN_PASSWORD);
   const before = await admin.rpc('admin_dashboard');
   if (before.error) throw new Error(before.error.message);
-  if (before.data.total !== 0 || before.data.capacity !== 200) {
-    console.error(`Test project must be empty with capacity 200 (total=${before.data.total}, capacity=${before.data.capacity}).`);
+  const { male, female } = before.data;
+  if (before.data.total !== 0 || male.capacity !== 100 || female.capacity !== 100) {
+    console.error(`Test project must be empty with capacity 100 per gender (total=${before.data.total}, boys=${male.capacity}, girls=${female.capacity}).`);
     process.exit(2);
   }
 
-  // 1. 250 registrations fired in parallel
+  // 1. 250 registrations (125 boys, 125 girls) fired in parallel
   const results = await Promise.all(Array.from({ length: 250 }, (_, i) => registerCall(i)));
   const errors = results.filter((r) => r.status !== 200);
   check(errors.length === 0, '250 parallel register_member calls: no HTTP errors', errors[0] ? `${errors[0].status} ${errors[0].body}` : '');
   const rateLimited = results.filter((r) => r.body?.result === 'rate_limited').length;
   check(rateLimited === 0, 'no call was rate-limited (raise rate_limit_per_minute on the test project first)', `${rateLimited}`);
 
-  const numbers = results.map((r) => r.body?.attendanceNumber).filter((n) => n != null).sort((a, b) => a - b);
-  check(numbers.length === 200, 'exactly 200 confirmed', `${numbers.length}`);
-  check(numbers.every((n, i) => n === i + 1), 'numbers are exactly 1–200, no gaps or duplicates');
-  const waiting = results.map((r) => r.body?.waitingPosition).filter((n) => n != null).sort((a, b) => a - b);
-  check(waiting.length === 50 && waiting.every((n, i) => n === i + 1), '50 waiting with positions 1–50', `${waiting.length}`);
+  for (const g of ['male', 'female']) {
+    const mine = results.filter((r) => r.body?.gender === g);
+    const numbers = mine.map((r) => r.body.attendanceNumber).filter((n) => n != null).sort((a, b) => a - b);
+    check(numbers.length === 100 && numbers.every((n, i) => n === i + 1), `${g}: numbers are exactly 1–100, no gaps or duplicates`, `${numbers.length}`);
+    const waiting = mine.map((r) => r.body.waitingPosition).filter((n) => n != null).sort((a, b) => a - b);
+    check(waiting.length === 25 && waiting.every((n, i) => n === i + 1), `${g}: 25 waiting with positions 1–25`, `${waiting.length}`);
+  }
 
-  // 2. Registrations and a capacity change at the same time
+  // 2. Registrations (20 boys, 20 girls) and a boys' capacity change at the same time
   const [capacity, ...more] = await Promise.all([
-    admin.rpc('set_capacity', { p_new_capacity: 230 }),
+    admin.rpc('set_capacity', { p_gender: 'male', p_new_capacity: 115 }),
     ...Array.from({ length: 40 }, (_, i) => registerCall(1000 + i)),
   ]);
-  check(!capacity.error && capacity.data.result === 'ok', 'set_capacity(230) during registrations succeeded', capacity.error?.message);
+  check(!capacity.error && capacity.data.result === 'ok', 'set_capacity(male, 115) during registrations succeeded', capacity.error?.message);
   check(more.every((r) => r.status === 200 && r.body.result === 'ok'), '40 concurrent registrations succeeded');
 
   const after = await admin.rpc('admin_dashboard');
   const rows = after.data.registrations;
-  const confirmed = rows.filter((r) => r.status === 'confirmed').map((r) => r.attendanceNumber).sort((a, b) => a - b);
   check(after.data.total === 290, 'total is 290', `${after.data.total}`);
-  check(confirmed.length === 230 && confirmed.every((n, i) => n === i + 1), 'confirmed numbers are exactly 1–230, no duplicates', `${confirmed.length}`);
-  const positions = rows.filter((r) => r.status === 'waiting').map((r) => r.waitingPosition);
-  check(positions.every((p, i) => p === i + 1), 'waiting positions are 1..n in arrival order', `${positions.length} waiting`);
+  for (const [g, cap] of [['male', 115], ['female', 100]]) {
+    const confirmed = rows.filter((r) => r.gender === g && r.status === 'confirmed').map((r) => r.attendanceNumber).sort((a, b) => a - b);
+    check(confirmed.length === cap && confirmed.every((n, i) => n === i + 1), `${g}: confirmed numbers are exactly 1–${cap}, no duplicates`, `${confirmed.length}`);
+    const positions = rows.filter((r) => r.gender === g && r.status === 'waiting').map((r) => r.waitingPosition);
+    check(positions.every((p, i) => p === i + 1), `${g}: waiting positions are 1..n in arrival order`, `${positions.length} waiting`);
+  }
 
   // 3. Same phone in another format, and same submission_id twice
   const dup = await rest('rpc/register_member', {
     method: 'POST',
-    body: JSON.stringify({ p_full_name: 'تكرار', p_phone: '+20 15 0000 0001', p_faculty: 'x', p_university: 'y', p_submission_id: randomUUID(), p_website: '' }),
+    body: JSON.stringify({ p_full_name: 'تكرار', p_phone: '+20 15 0000 0001', p_faculty: 'x', p_university: 'y', p_gender: 'female', p_submission_id: randomUUID(), p_website: '' }),
   }).then((r) => r.json());
   check(dup.result === 'phone_taken', 'same phone in another format → phone_taken');
 }

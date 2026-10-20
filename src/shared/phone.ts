@@ -27,10 +27,15 @@ export function isValidPhone(normalized: string): boolean {
   return PHONE_PATTERN.test(normalized);
 }
 
-export type Field = 'full_name' | 'phone' | 'faculty' | 'university';
+export type Field = 'full_name' | 'gender' | 'phone' | 'faculty' | 'university';
+
+export type Gender = 'male' | 'female';
+
+export const GENDER_LABEL: Record<Gender, string> = { male: 'ولاد', female: 'بنات' };
 
 export interface RegistrationInput {
   fullName: string;
+  gender: string;
   phone: string;
   faculty: string;
   university: string;
@@ -40,6 +45,7 @@ export interface RegistrationInput {
 export function validateRegistration(input: RegistrationInput): Field | null {
   const name = cleanText(input.fullName);
   if (name.length < 2 || name.length > 100) return 'full_name';
+  if (input.gender !== 'male' && input.gender !== 'female') return 'gender';
   if (!isValidPhone(normalizePhone(input.phone))) return 'phone';
   const faculty = cleanText(input.faculty);
   if (faculty.length < 1 || faculty.length > 100) return 'faculty';

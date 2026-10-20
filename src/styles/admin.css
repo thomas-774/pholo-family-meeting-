@@ -58,6 +58,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+.counter-sub {
+  color: var(--text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
 .capacity-form {
   margin-bottom: 16px;
 }
@@ -71,10 +77,11 @@
 .capacity-row {
   display: flex;
   gap: 10px;
-  max-width: 360px;
+  max-width: 480px;
 }
 
-.capacity-row input {
+.capacity-row input,
+.capacity-row select {
   flex: 1;
 }
 

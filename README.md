@@ -2,8 +2,8 @@
 
 Registration site for **اجتماع فيلو فاميلي — بحضور الأنبا روفائيل**.
 
-- Public page `/`: members register with name, phone, faculty, and university. The first 200 get attendance numbers 1–200. Everyone after that goes on the waiting list.
-- Admin page `/admin`: view registrations and change capacity. Raising capacity promotes waiting members automatically, in arrival order.
+- Public page `/`: members register with name, gender, phone, faculty, and university. Boys and girls are separate pools: the first 100 boys get attendance numbers 1–100, and the first 100 girls also get 1–100. Everyone after that goes on their own gender's waiting list.
+- Admin page `/admin`: view registrations (filter by gender) and change each pool's capacity. Raising capacity promotes waiting members of that gender automatically, in arrival order.
 
 The site is static files on **Cloudflare Pages** plus a **Supabase** database. There is no server of our own. All rules run inside PostgreSQL functions (`supabase/migrations/`). The full design is in [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
 
@@ -38,6 +38,9 @@ VITE_SUPABASE_ANON_KEY=<anon or publishable key>
    2. `supabase/migrations/002_functions.sql`
    3. `supabase/migrations/003_permissions.sql`
    4. `supabase/migrations/004_delete_registration.sql`
+   5. `supabase/migrations/005_reset_number_after_delete.sql`
+   6. `supabase/migrations/006_fill_number_gaps.sql`
+   7. `supabase/migrations/007_gender_pools.sql`: **deletes all existing registrations**
 
    Or, with the [Supabase CLI](https://supabase.com/docs/guides/cli): `supabase link --project-ref <ref>` then `supabase db push`.
 4. **Project Settings → API:** make sure **Exposed schemas** contains only `public` (and `graphql_public` if it is there by default). **Never add `private`.**
@@ -106,7 +109,7 @@ npm run fonts    # Cairo woff2, Arabic + Latin, weights 400/600/800
 
 | What | How |
 |---|---|
-| Unit + database logic | `npm test`. Runs the real migrations in PGlite: numbering, waiting list, phone formats, idempotency, honeypot, rate limit, 200 → 210 promotion, capacity lowering, admin access, private-table access. |
+| Unit + database logic | `npm test`. Runs the real migrations in PGlite: numbering, waiting list, phone formats, idempotency, honeypot, rate limit, 200 → 210 promotion, capacity lowering, separate boys/girls pools, admin access, private-table access. |
 | Security against a real project | `SUPABASE_URL=... SUPABASE_ANON_KEY=... node supabase/tests/remote-checks.mjs security`. Optionally also set `NONADMIN_EMAIL`/`NONADMIN_PASSWORD` for a user who is **not** in `private.admins`. |
 | True parallel concurrency | On the **test** project, after resetting it (below) and raising its rate limit: `SUPABASE_URL=... SUPABASE_ANON_KEY=... ADMIN_EMAIL=... ADMIN_PASSWORD=... node supabase/tests/remote-checks.mjs concurrency --test-project`. This sends 250 parallel registrations, then a capacity change during 40 more. |
 | Rush load test | [k6](https://k6.io): see the header of [loadtest/rush.k6.js](loadtest/rush.k6.js), then check with [loadtest/verify.sql](loadtest/verify.sql). |
@@ -116,7 +119,7 @@ npm run fonts    # Cairo woff2, Arabic + Latin, weights 400/600/800
 
 ```sql
 truncate private.registrations, private.rate_limits restart identity;
-update private.settings set capacity = 200, last_attendance_number = 0, rate_limit_per_minute = 100000 where id = 1;
+update private.settings set capacity_male = 100, capacity_female = 100, rate_limit_per_minute = 100000 where id = 1;
 -- after testing:
 update private.settings set rate_limit_per_minute = 30 where id = 1;
 ```
@@ -128,9 +131,9 @@ Do this once a day while registration is open, and once after it closes.
 
 ## 7. Go-live checklist
 
-- [ ] Test project: `npm test` passes, the `security` and `concurrency` remote checks pass, and the k6 thresholds pass (verify.sql shows exactly 1–200).
+- [ ] Test project: `npm test` passes, the `security` and `concurrency` remote checks pass, and the k6 thresholds pass (verify.sql shows exactly 1–100 for each gender).
 - [ ] Production project: migrations applied, sign-ups **disabled**, exposed schemas = `public` only.
-- [ ] Production project is empty: `select * from private.settings;` → `(1, 200, 0, 30)`, and `select count(*) from private.registrations;` → `0`.
+- [ ] Production project is empty: `select capacity_male, capacity_female, rate_limit_per_minute from private.settings;` → `(100, 100, 30)`, and `select count(*) from private.registrations;` → `0`.
 - [ ] Client IP header checked (§2).
 - [ ] First admin added. Log in at `/admin` and confirm the dashboard loads.
 - [ ] `src/shared/config.ts` has the **production** URL and anon key. The deployed site loads over HTTPS.

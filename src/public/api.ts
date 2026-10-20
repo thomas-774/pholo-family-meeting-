@@ -1,10 +1,12 @@
 // Plain-fetch wrappers for the public RPCs. No supabase-js on the public page (plan §7b).
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from '../shared/config';
+import type { Gender } from '../shared/phone';
 
 export type Status = 'confirmed' | 'waiting';
 
 export interface Registration {
   fullName: string;
+  gender: Gender;
   status: Status;
   attendanceNumber?: number;
   waitingPosition?: number;
@@ -21,6 +23,7 @@ export interface RegisterParams {
   p_phone: string;
   p_faculty: string;
   p_university: string;
+  p_gender: Gender;
   p_submission_id: string;
   p_website: string;
 }

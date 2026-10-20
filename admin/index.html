@@ -45,22 +45,29 @@
 
         <div class="counters">
           <div class="card counter">
-            <span class="counter-label">المؤكدين / السعة</span>
-            <span class="counter-value"><span id="count-confirmed">–</span> / <span id="count-capacity">–</span></span>
+            <span class="counter-label">الولاد (مؤكد / السعة)</span>
+            <span class="counter-value"><span id="count-male">–</span> / <span id="capacity-male">–</span></span>
+            <span class="counter-sub">متبقي <span id="left-male">–</span> · انتظار <span id="waiting-male">–</span></span>
           </div>
           <div class="card counter">
-            <span class="counter-label">قائمة الانتظار</span>
-            <span class="counter-value" id="count-waiting">–</span>
+            <span class="counter-label">البنات (مؤكد / السعة)</span>
+            <span class="counter-value"><span id="count-female">–</span> / <span id="capacity-female">–</span></span>
+            <span class="counter-sub">متبقي <span id="left-female">–</span> · انتظار <span id="waiting-female">–</span></span>
           </div>
           <div class="card counter">
             <span class="counter-label">الإجمالي</span>
             <span class="counter-value" id="count-total">–</span>
+            <span class="counter-sub">مؤكد <span id="count-confirmed">–</span> · انتظار <span id="count-waiting">–</span></span>
           </div>
         </div>
 
         <form id="capacity-form" class="card capacity-form">
           <label for="capacity">السعة</label>
           <div class="capacity-row">
+            <select id="capacity-gender" aria-label="سعة مين">
+              <option value="male">الولاد</option>
+              <option value="female">البنات</option>
+            </select>
             <input id="capacity" name="capacity" type="number" inputmode="numeric" min="1" step="1" dir="ltr" required />
             <button id="capacity-btn" class="btn" type="submit">حفظ</button>
           </div>
@@ -77,6 +84,14 @@
                 <option value="waiting">انتظار</option>
               </select>
             </div>
+            <div class="field">
+              <label for="gender-filter">النوع</label>
+              <select id="gender-filter">
+                <option value="all">الكل</option>
+                <option value="male">ولاد</option>
+                <option value="female">بنات</option>
+              </select>
+            </div>
             <div class="field grow">
               <label for="search">بحث بالاسم أو الموبايل</label>
               <input id="search" type="search" autocomplete="off" />
@@ -91,6 +106,7 @@
               <thead>
                 <tr>
                   <th>رقم الحضور</th>
+                  <th>النوع</th>
                   <th>الاسم</th>
                   <th>الموبايل</th>
                   <th>الكلية</th>

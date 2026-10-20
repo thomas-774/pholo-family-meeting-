@@ -68,6 +68,15 @@
             <p class="field-error" id="full_name-error" hidden></p>
           </div>
 
+          <fieldset class="field" id="gender-group" tabindex="-1">
+            <legend>النوع</legend>
+            <div class="choice-row">
+              <label class="choice"><input type="radio" name="gender" value="male" required /> ذكر</label>
+              <label class="choice"><input type="radio" name="gender" value="female" /> أنثى</label>
+            </div>
+            <p class="field-error" id="gender-error" hidden></p>
+          </fieldset>
+
           <div class="field">
             <label for="phone">رقم الموبايل</label>
             <input
@@ -127,7 +136,7 @@
             <div>
               <span class="attendance-number" id="attendance-number"></span>
             </div>
-            <p class="number-caption">رقم الحضور بتاعك — وريه على الباب</p>
+            <p class="number-caption">رقم الحضور بتاعك (<span id="number-pool"></span>) — وريه على الباب</p>
           </div>
 
           <div id="status-waiting" hidden>

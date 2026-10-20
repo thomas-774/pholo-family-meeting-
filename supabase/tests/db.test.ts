@@ -12,20 +12,25 @@ let db: Db;
 async function setup(capacity = 200) {
   db = await freshDb();
   await db.exec(`
-    update private.settings set capacity = ${capacity}, rate_limit_per_minute = 100000;
+    update private.settings
+       set capacity_male = ${capacity}, capacity_female = ${capacity}, rate_limit_per_minute = 100000;
     insert into auth.users (id) values ('${ADMIN}'), ('${NOT_ADMIN}');
     insert into private.admins (user_id) values ('${ADMIN}');
   `);
 }
 
-const setCapacity = (n: number, uid = ADMIN) =>
+const setCapacity = (n: number, uid = ADMIN, gender = 'male') =>
   asRole<{ result: string; promotedCount?: number; promoted?: { attendanceNumber: number }[]; reason?: string }>(
-    db, 'authenticated', 'select public.set_capacity($1)', [n], { uid });
+    db, 'authenticated', 'select public.set_capacity($1, $2)', [gender, n], { uid });
+
+type Pool = { capacity: number; confirmed: number; waiting: number };
 
 const dashboard = (uid = ADMIN) =>
   asRole<{
-    capacity: number; confirmed: number; waiting: number; total: number;
-    registrations: { status: string; attendanceNumber: number | null; waitingPosition: number | null; phone: string }[];
+    male: Pool; female: Pool; confirmed: number; waiting: number; total: number;
+    registrations: {
+      id: number; gender: string; status: string; attendanceNumber: number | null; waitingPosition: number | null; phone: string;
+    }[];
   }>(db, 'authenticated', 'select public.admin_dashboard()', [], { uid });
 
 const lookup = (token: string) =>
@@ -74,6 +79,8 @@ describe('register_member', () => {
   it('rejects invalid input field by field', async () => {
     expect(await register(db, { name: 'م' })).toEqual({ result: 'invalid', field: 'full_name' });
     expect(await register(db, { name: 'م'.repeat(101) })).toEqual({ result: 'invalid', field: 'full_name' });
+    expect(await register(db, { gender: '' })).toEqual({ result: 'invalid', field: 'gender' });
+    expect(await register(db, { gender: 'Male' })).toEqual({ result: 'invalid', field: 'gender' });
     expect(await register(db, { phone: '0131234567' })).toEqual({ result: 'invalid', field: 'phone' });
     expect(await register(db, { phone: '01312345678' })).toEqual({ result: 'invalid', field: 'phone' });
     expect(await register(db, { faculty: '   ' })).toEqual({ result: 'invalid', field: 'faculty' });
@@ -90,7 +97,7 @@ describe('register_member', () => {
   });
 
   it('rate-limits per IP', async () => {
-    await db.exec('update private.settings set capacity = 100, rate_limit_per_minute = 3');
+    await db.exec('update private.settings set capacity_male =100, rate_limit_per_minute = 3');
     for (let i = 0; i < 3; i++) expect((await register(db, {}, { ip: '1.2.3.4' })).result).toBe('ok');
     expect(await register(db, {}, { ip: '1.2.3.4' })).toEqual({ result: 'rate_limited' });
     expect((await register(db, {}, { ip: '5.6.7.8' })).result).toBe('ok');
@@ -103,8 +110,8 @@ describe('get_my_registration', () => {
   it('returns name/status/number, never the phone', async () => {
     const a = await register(db, { name: 'أبانوب' });
     const b = await register(db, { name: 'مارينا' });
-    expect(await lookup(a.token!)).toEqual({ fullName: 'أبانوب', status: 'confirmed', attendanceNumber: 1 });
-    expect(await lookup(b.token!)).toEqual({ fullName: 'مارينا', status: 'waiting', waitingPosition: 1 });
+    expect(await lookup(a.token!)).toEqual({ fullName: 'أبانوب', gender: 'male', status: 'confirmed', attendanceNumber: 1 });
+    expect(await lookup(b.token!)).toEqual({ fullName: 'مارينا', gender: 'male', status: 'waiting', waitingPosition: 1 });
   });
 
   it('returns null for unknown or malformed tokens', async () => {
@@ -131,14 +138,15 @@ describe('set_capacity', () => {
     expect(after.slice(10).map((r) => r!.waitingPosition)).toEqual([1, 2, 3, 4, 5]);
 
     const d = await dashboard();
-    expect([d.capacity, d.confirmed, d.waiting, d.total]).toEqual([210, 210, 5, 215]);
+    expect([d.male.capacity, d.confirmed, d.waiting, d.total]).toEqual([210, 210, 5, 215]);
+    expect(d.female).toEqual({ capacity: 200, confirmed: 0, waiting: 0 });
     const numbers = d.registrations.filter((r) => r.status === 'confirmed').map((r) => r.attendanceNumber);
     expect(numbers).toEqual(Array.from({ length: 210 }, (_, i) => i + 1));
     expect(d.registrations.filter((r) => r.status === 'waiting').map((r) => r.waitingPosition)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('rejects lowering below the confirmed count; numbers are never reused', async () => {
-    await db.exec('update private.settings set capacity = 3');
+    await db.exec('update private.settings set capacity_male =3');
     for (let i = 0; i < 5; i++) await register(db);
     expect(await setCapacity(2)).toMatchObject({ result: 'invalid', reason: 'below_confirmed' });
     expect(await setCapacity(0)).toMatchObject({ result: 'invalid', reason: 'out_of_range' });
@@ -161,7 +169,7 @@ describe('delete_registration', () => {
     asRole<{ result: string; promoted: { attendanceNumber: number } | null }>(
       db, 'authenticated', 'select public.delete_registration($1)', [id], { uid });
 
-  it('deleting a confirmed row promotes the first waiting with the next number', async () => {
+  it('deleting a confirmed row promotes the first waiting into the freed number', async () => {
     const all: RegisterResult[] = [];
     for (let i = 0; i < 4; i++) all.push(await register(db));
     const before = await dashboard();
@@ -169,9 +177,9 @@ describe('delete_registration', () => {
 
     const res = await del(first.id);
     expect(res.result).toBe('ok');
-    expect(res.promoted!.attendanceNumber).toBe(3);
+    expect(res.promoted!.attendanceNumber).toBe(1);
     expect(await lookup(all[0].token!)).toBeNull();
-    expect(await lookup(all[2].token!)).toMatchObject({ status: 'confirmed', attendanceNumber: 3 });
+    expect(await lookup(all[2].token!)).toMatchObject({ status: 'confirmed', attendanceNumber: 1 });
     expect(await lookup(all[3].token!)).toMatchObject({ status: 'waiting', waitingPosition: 1 });
 
     const d = await dashboard();
@@ -196,10 +204,36 @@ describe('delete_registration', () => {
 
     expect(await cancel(all[1].token!)).toEqual({ result: 'ok' });
     expect(await lookup(all[1].token!)).toBeNull();
-    expect(await lookup(all[2].token!)).toMatchObject({ status: 'confirmed', attendanceNumber: 3 });
+    expect(await lookup(all[2].token!)).toMatchObject({ status: 'confirmed', attendanceNumber: 2 });
     expect(await cancel(all[1].token!)).toEqual({ result: 'not_found' });
     expect(await cancel('not-a-token')).toEqual({ result: 'not_found' });
     expect((await dashboard()).total).toBe(2);
+  });
+
+  it('a new member always takes the lowest free number', async () => {
+    await db.exec('update private.settings set capacity_male =10');
+    for (let i = 0; i < 3; i++) await register(db);
+    for (const r of (await dashboard()).registrations as unknown as { id: number }[]) await del(r.id);
+    expect((await register(db)).attendanceNumber).toBe(1);
+
+    for (let i = 0; i < 2; i++) await register(db); // 1, 2, 3
+    const second = (await dashboard()).registrations.find((r) => r.attendanceNumber === 2) as unknown as { id: number };
+    await del(second.id);
+    expect((await register(db)).attendanceNumber).toBe(2);
+    expect((await register(db)).attendanceNumber).toBe(4);
+
+    // #1 deleted while #2 remains -> next gets #1
+    const one = (await dashboard()).registrations.find((r) => r.attendanceNumber === 1) as unknown as { id: number };
+    await del(one.id);
+    expect((await register(db)).attendanceNumber).toBe(1);
+  });
+
+  it('raising capacity fills gaps first', async () => {
+    for (let i = 0; i < 4; i++) await register(db); // 1, 2 confirmed; 2 waiting
+    const one = (await dashboard()).registrations.find((r) => r.attendanceNumber === 1) as unknown as { id: number };
+    await db.exec('update private.settings set capacity_male =1');
+    await del(one.id); // capacity 1, #2 confirmed, nobody promoted
+    expect((await setCapacity(3)).promoted!.map((p) => p.attendanceNumber)).toEqual([1, 3]);
   });
 
   it('rejects anon and non-admin users', async () => {
@@ -210,12 +244,73 @@ describe('delete_registration', () => {
   });
 });
 
+describe('gender pools', () => {
+  beforeEach(() => setup(2));
+
+  const del = (id: number) =>
+    asRole<{ result: string; promoted: { id: number; attendanceNumber: number } | null }>(
+      db, 'authenticated', 'select public.delete_registration($1)', [id], { uid: ADMIN });
+
+  it('boys and girls each number from 1 and overflow into their own waiting list', async () => {
+    const genders = ['male', 'female', 'male', 'female', 'male', 'female', 'female'];
+    const res: RegisterResult[] = [];
+    for (const gender of genders) res.push(await register(db, { gender }));
+    expect(res.map((r) => r.gender)).toEqual(genders);
+    expect(res.map((r) => r.attendanceNumber ?? null)).toEqual([1, 1, 2, 2, null, null, null]);
+    expect(res.map((r) => r.waitingPosition ?? null)).toEqual([null, null, null, null, 1, 1, 2]);
+
+    const d = await dashboard();
+    expect(d.male).toEqual({ capacity: 2, confirmed: 2, waiting: 1 });
+    expect(d.female).toEqual({ capacity: 2, confirmed: 2, waiting: 2 });
+    expect([d.confirmed, d.waiting, d.total]).toEqual([4, 3, 7]);
+    expect(d.registrations.map((r) => [r.status, r.gender, r.attendanceNumber ?? r.waitingPosition])).toEqual([
+      ['confirmed', 'male', 1], ['confirmed', 'male', 2],
+      ['confirmed', 'female', 1], ['confirmed', 'female', 2],
+      ['waiting', 'male', 1],
+      ['waiting', 'female', 1], ['waiting', 'female', 2],
+    ]);
+  });
+
+  it('a freed seat goes to the first waiting member of the same gender only', async () => {
+    const boys = [], girls = [];
+    for (let i = 0; i < 3; i++) boys.push(await register(db, { gender: 'male' }));   // 3rd boy waits first
+    for (let i = 0; i < 3; i++) girls.push(await register(db, { gender: 'female' }));
+    const girlOne = (await dashboard()).registrations.find((r) => r.gender === 'female' && r.attendanceNumber === 1)!;
+
+    const res = await del(girlOne.id);
+    expect(res.promoted!.attendanceNumber).toBe(1);
+    expect(await lookup(girls[2].token!)).toMatchObject({ gender: 'female', status: 'confirmed', attendanceNumber: 1 });
+    expect(await lookup(boys[2].token!)).toMatchObject({ gender: 'male', status: 'waiting', waitingPosition: 1 });
+  });
+
+  it('set_capacity changes one pool and promotes only that gender', async () => {
+    for (let i = 0; i < 3; i++) await register(db, { gender: 'male' });
+    for (let i = 0; i < 3; i++) await register(db, { gender: 'female' });
+
+    const res = await setCapacity(3, ADMIN, 'female');
+    expect(res.promoted!.map((p) => p.attendanceNumber)).toEqual([3]);
+    const d = await dashboard();
+    expect(d.female).toEqual({ capacity: 3, confirmed: 3, waiting: 0 });
+    expect(d.male).toEqual({ capacity: 2, confirmed: 2, waiting: 1 });
+    expect(await setCapacity(3, ADMIN, 'other')).toMatchObject({ result: 'invalid', reason: 'invalid_gender' });
+  });
+
+  it('the database refuses a duplicate number within a gender', async () => {
+    await register(db, { gender: 'male' });
+    await expect(db.exec(`
+      insert into private.registrations
+        (full_name, phone, faculty, university, gender, status, attendance_number, token_hash, submission_id)
+      values ('xx', '01099999999', 'x', 'y', 'male', 'confirmed', 1, 'h', gen_random_uuid())
+    `)).rejects.toThrow(/registrations_gender_attendance_number_key/);
+  });
+});
+
 describe('admin access', () => {
   beforeEach(() => setup(200));
 
   it('rejects anon and non-admin users', async () => {
     await expect(asRole(db, 'anon', 'select public.admin_dashboard()')).rejects.toThrow(/permission denied/);
-    await expect(asRole(db, 'anon', 'select public.set_capacity(500)')).rejects.toThrow(/permission denied/);
+    await expect(asRole(db, 'anon', "select public.set_capacity('male', 500)")).rejects.toThrow(/permission denied/);
     await expect(dashboard(NOT_ADMIN)).rejects.toThrow(/not authorized/);
     await expect(setCapacity(500, NOT_ADMIN)).rejects.toThrow(/not authorized/);
     await expect(asRole(db, 'authenticated', 'select public.admin_dashboard()')).rejects.toThrow(/not authorized/);

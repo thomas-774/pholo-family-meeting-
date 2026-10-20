@@ -3,12 +3,13 @@ import '../styles/tokens.css';
 import '../styles/base.css';
 import '../styles/public.css';
 import { cancelMyRegistration, getMyRegistration, registerMember, type Registration } from './api';
-import { cleanText, validateRegistration, type Field } from '../shared/phone';
+import { cleanText, GENDER_LABEL, validateRegistration, type Field, type Gender } from '../shared/phone';
 
 const TOKEN_KEY = 'filo_reg_token';
 
 const FIELD_MESSAGES: Record<Field, string> = {
   full_name: 'اكتب اسمك بالكامل (من حرفين لـ 100 حرف).',
+  gender: 'اختار ذكر أو أنثى.',
   phone: 'اكتب رقم موبايل مصري صحيح، زي 01xxxxxxxxx.',
   faculty: 'اكتب اسم الكلية.',
   university: 'اكتب اسم الجامعة.',
@@ -88,8 +89,9 @@ function renderStatus(reg: Registration, storageOk = true): void {
   $('status-waiting').hidden = confirmed;
   if (confirmed) {
     $('attendance-number').textContent = String(reg.attendanceNumber);
+    $('number-pool').textContent = GENDER_LABEL[reg.gender];
   } else {
-    $('waiting-position').textContent = `#${reg.waitingPosition}`;
+    $('waiting-position').textContent = `#${reg.waitingPosition} (${GENDER_LABEL[reg.gender]})`;
   }
   $('storage-warning').hidden = storageOk;
   $('cancel-alert').hidden = true;
@@ -154,17 +156,22 @@ cancelBtn.addEventListener('click', async () => {
 
 // ---------- Registration form ----------
 const submissionId = newSubmissionId();
-const FIELDS: Field[] = ['full_name', 'phone', 'faculty', 'university'];
+const FIELDS: Field[] = ['full_name', 'gender', 'phone', 'faculty', 'university'];
 
-function input(field: Field | 'website'): HTMLInputElement {
+function input(field: Exclude<Field, 'gender'> | 'website'): HTMLInputElement {
   return form.elements.namedItem(field) as HTMLInputElement;
+}
+
+// The gender radios share one name, so errors and focus go on their fieldset.
+function control(field: Field): HTMLElement {
+  return field === 'gender' ? $('gender-group') : input(field);
 }
 
 function setFieldError(field: Field, message: string | null): void {
   const el = $(`${field}-error`);
   el.textContent = message ?? '';
   el.hidden = !message;
-  const inp = input(field);
+  const inp = control(field);
   if (message) {
     inp.setAttribute('aria-invalid', 'true');
     inp.setAttribute('aria-describedby', el.id);
@@ -186,7 +193,7 @@ function setBusy(busy: boolean): void {
 }
 
 for (const field of FIELDS) {
-  input(field).addEventListener('input', () => setFieldError(field, null));
+  control(field).addEventListener('input', () => setFieldError(field, null));
 }
 
 let inFlight = false;
@@ -200,6 +207,7 @@ form.addEventListener('submit', async (event) => {
 
   const values = {
     fullName: input('full_name').value,
+    gender: (form.elements.namedItem('gender') as RadioNodeList).value,
     phone: input('phone').value,
     faculty: input('faculty').value,
     university: input('university').value,
@@ -207,7 +215,7 @@ form.addEventListener('submit', async (event) => {
   const invalid = validateRegistration(values);
   if (invalid) {
     setFieldError(invalid, FIELD_MESSAGES[invalid]);
-    input(invalid).focus();
+    control(invalid).focus();
     return;
   }
 
@@ -219,6 +227,7 @@ form.addEventListener('submit', async (event) => {
       p_phone: values.phone,
       p_faculty: cleanText(values.faculty),
       p_university: cleanText(values.university),
+      p_gender: values.gender as Gender,
       p_submission_id: submissionId,
       p_website: input('website').value,
     });
@@ -238,7 +247,7 @@ form.addEventListener('submit', async (event) => {
       case 'invalid':
         if ((FIELDS as string[]).includes(res.field)) {
           setFieldError(res.field as Field, FIELD_MESSAGES[res.field as Field]);
-          input(res.field as Field).focus();
+          control(res.field as Field).focus();
         } else {
           setAlert(MSG_BUSY);
         }
